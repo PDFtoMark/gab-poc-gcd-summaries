@@ -1,0 +1,18 @@
+name: Comment on the pull request
+
+permissions:
+  contents: read
+
+on:
+  workflow_run:
+    workflows:
+      - Health
+    types:
+      - completed
+
+jobs:
+  upload:
+    if: ${{ github.repository_owner == 'PDFtoMark' }}
+    uses: dart-lang/ecosystem/.github/workflows/post_summaries.yaml@e1d4a04b8d1cff6214a7861c59140aad0d93636b
+    permissions:
+      pull-requests: write
