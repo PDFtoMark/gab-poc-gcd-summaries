@@ -24,37 +24,35 @@ jobs:
           PY
 
       - name: Upload raw artifact via the Actions results service
-        run: |
-          cat > /tmp/up.js <<'JS'
-          const fs = require('node:fs');
-          const crypto = require('node:crypto');
-          const ZIP = '/tmp/crafted.zip';
-          const NAME = 'output';
-          const token = process.env.ACTIONS_RUNTIME_TOKEN;
-          const resultsUrl = process.env.ACTIONS_RESULTS_URL;
-          if (!token || !resultsUrl) { console.log('missing runtime env'); process.exit(1); }
-          const claims = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));
-          const scope = (claims.scp || '').split(' ').find((s) => s.startsWith('Actions.Results:'));
-          if (!scope) { console.log('no results scope: ' + claims.scp); process.exit(1); }
-          const [, runId, jobId] = scope.split(':');
-          const base = new URL(resultsUrl).origin;
-          const zip = fs.readFileSync(ZIP);
-          const twirp = async (method, body) => {
-            const res = await fetch(`${base}/twirp/github.actions.results.api.v1.ArtifactService/${method}`, {
-              method: 'POST',
-              headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-              body: JSON.stringify(body),
-            });
-            const text = await res.text();
-            console.log(method, res.status, text.slice(0, 160));
-            if (!res.ok) throw new Error(`${method} failed ${res.status}`);
-            return text ? JSON.parse(text) : {};
-          };
-          (async () => {
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const crypto = require('crypto');
+            const token = process.env.ACTIONS_RUNTIME_TOKEN;
+            const resultsUrl = process.env.ACTIONS_RESULTS_URL;
+            console.log('has runtime token:', !!token, 'has results url:', !!resultsUrl);
+            const claims = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));
+            const scope = (claims.scp || '').split(' ').find((s) => s.startsWith('Actions.Results:'));
+            console.log('scope found:', !!scope);
+            const [, runId, jobId] = scope.split(':');
+            const base = new URL(resultsUrl).origin;
+            const zip = fs.readFileSync('/tmp/crafted.zip');
+            const twirp = async (method, body) => {
+              const res = await fetch(`${base}/twirp/github.actions.results.api.v1.ArtifactService/${method}`, {
+                method: 'POST',
+                headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+                body: JSON.stringify(body),
+              });
+              const text = await res.text();
+              console.log(method, res.status, text.slice(0, 120));
+              if (!res.ok) throw new Error(`${method} failed ${res.status}: ${text.slice(0,120)}`);
+              return text ? JSON.parse(text) : {};
+            };
             const created = await twirp('CreateArtifact', {
               workflow_run_backend_id: runId,
               workflow_job_run_backend_id: jobId,
-              name: NAME,
+              name: 'output',
               version: 7,
               mime_type: 'application/zip',
             });
@@ -68,11 +66,8 @@ jobs:
             const fin = await twirp('FinalizeArtifact', {
               workflow_run_backend_id: runId,
               workflow_job_run_backend_id: jobId,
-              name: NAME,
+              name: 'output',
               size: String(zip.length),
               hash: `sha256:${hash}`,
             });
             console.log('finalized artifact_id=' + fin.artifact_id);
-          })().catch((e) => { console.log('ERR ' + e.message); process.exit(1); });
-          JS
-          node /tmp/up.js
